@@ -5,7 +5,7 @@ TestModel は実際のLLMを呼ばない偽モデルで、登録されたツー�
 「ツールが登録され、呼ばれ、結果がモデルに戻るか」を確かめられる。
 """
 
-from pydantic_ai import DeferredToolRequests
+from pydantic_ai import DeferredToolRequests, DeferredToolResults
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 
@@ -40,3 +40,50 @@ def test_glossary_result_reaches_the_model():
         result = agent.run_sync("RAGとは？")
     returns = _parts(result, ToolReturnPart)
     assert returns and returns[0].tool_name == "search_glossary"
+
+
+def test_learning_log_waits_for_approval_and_saves_after_approval(tmp_path, monkeypatch):
+    """承認待ちでは保存せず、承認結果を渡して再開した後にだけ保存する。"""
+    from app import tools
+
+    monkeypatch.setattr(tools, "LOG_DIR", tmp_path / "learning_log")
+    with agent.override(model=TestModel(call_tools=["save_learning_log"])):
+        waiting = agent.run_sync("学習記録を保存して")
+
+    assert isinstance(waiting.output, DeferredToolRequests)
+    assert len(waiting.output.approvals) == 1
+    assert not tools.LOG_DIR.exists()
+
+    approval = waiting.output.approvals[0]
+    with agent.override(model=TestModel(call_tools=[])):
+        completed = agent.run_sync(
+            message_history=waiting.all_messages(),
+            deferred_tool_results=DeferredToolResults(
+                approvals={approval.tool_call_id: True}
+            ),
+        )
+
+    assert isinstance(completed.output, str)
+    assert list(tools.LOG_DIR.glob("*.json"))
+
+
+def test_learning_log_is_not_saved_when_approval_is_denied(tmp_path, monkeypatch):
+    """拒否を渡して再開した場合、保存ファイルが作られないことを確認する。"""
+    from app import tools
+
+    monkeypatch.setattr(tools, "LOG_DIR", tmp_path / "learning_log")
+    with agent.override(model=TestModel(call_tools=["save_learning_log"])):
+        waiting = agent.run_sync("学習記録を保存して")
+
+    assert isinstance(waiting.output, DeferredToolRequests)
+    approval = waiting.output.approvals[0]
+    with agent.override(model=TestModel(call_tools=[])):
+        completed = agent.run_sync(
+            message_history=waiting.all_messages(),
+            deferred_tool_results=DeferredToolResults(
+                approvals={approval.tool_call_id: False}
+            ),
+        )
+
+    assert isinstance(completed.output, str)
+    assert not tools.LOG_DIR.exists()

@@ -46,3 +46,18 @@ def test_default_question_of_lecture1_is_answerable_from_glossary():
     assert "3レベル" in DEFAULT_QUESTION
     hits = json.loads(tools.search_glossary("3レベル"))
     assert hits[0]["term"] == "宿題の3レベル"
+
+
+def test_save_learning_log_creates_json_in_log_directory(tmp_path, monkeypatch):
+    """保存先を一時ディレクトリに置き換え、記録内容が JSON として残ることを確認する。"""
+    monkeypatch.setattr(tools, "LOG_DIR", tmp_path / "learning_log")
+
+    result = tools.save_learning_log("承認フロー", "承認後に記録を保存する")
+
+    files = list(tools.LOG_DIR.glob("*.json"))
+    assert len(files) == 1
+    assert json.loads(files[0].read_text(encoding="utf-8")) == {
+        "topic": "承認フロー",
+        "note": "承認後に記録を保存する",
+    }
+    assert files[0].name in result

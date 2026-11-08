@@ -5,10 +5,14 @@
 """
 
 import json
+import random
+from datetime import datetime
 from functools import cache
 from pathlib import Path
+from uuid import uuid4
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+LOG_DIR = Path(__file__).resolve().parent.parent / "learning_log"
 MAX_RESULTS = 3
 
 
@@ -77,3 +81,46 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+
+def make_quiz(lecture: int) -> str:
+    """指定した講義回の用語から復習問題を1つ作る。
+
+    確認問題、復習クイズ、第N回の問題を求められたときに使う。
+    lecture は講義回の番号。該当する用語が見つからない場合は、
+    問題を作成できない旨の説明文を返す。
+    """
+    candidates = [entry for entry in load_glossary() if entry["lecture"] == lecture]
+    if not candidates:
+        return f"第{lecture}回の用語が見つからないため、復習問題を作成できません。"
+
+    entry = random.choice(candidates)
+    return json.dumps(
+        {
+            "question": f"「{entry['term']}」の意味は？",
+            "answer": entry["definition"],
+        },
+        ensure_ascii=False,
+    )
+
+
+def save_learning_log(topic: str, note: str) -> str:
+    """学習の記録を learning_log/ に保存する。
+
+    ユーザーが学習記録の保存を依頼したときに使う。
+    保存前に利用者の承認が必要なため、必ず requires_approval=True で登録する。
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+    # 入力値をファイル名にせず UUID を加え、同時刻の記録も上書きしない。
+    path = LOG_DIR / f"{timestamp}_{uuid4().hex}.json"
+    with path.open("x", encoding="utf-8") as file:
+        file.write(
+            json.dumps(
+                {"topic": topic, "note": note},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        file.write("\n")
+    return f"学習記録を保存しました: {path.name}"
